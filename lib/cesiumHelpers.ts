@@ -61,6 +61,8 @@ export interface LayerVisibility {
   gpsJamming: boolean;
   noFlyZones: boolean;
   events: boolean;
+  countryBoundaries: boolean;
+  countryLabels: boolean;
 }
 
 export const DEFAULT_LAYERS: LayerVisibility = {
@@ -71,4 +73,6 @@ export const DEFAULT_LAYERS: LayerVisibility = {
   gpsJamming: true,
   noFlyZones: true,
   events: true,
+  countryBoundaries: true,
+  countryLabels: true,
 };

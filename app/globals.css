@@ -232,3 +232,64 @@ input[type=range]:focus { outline: none; }
 .log-entry.gps { border-color: var(--accent-purple); }
 .log-entry.ai { border-color: var(--accent-cyan); }
 .log-entry.system { border-color: var(--text-dim); }
+
+/* ── Responsive sidebar ──────────────────────────────────────────────────── */
+.sidebar-hamburger { display: none; }
+
+@media (max-width: 768px) {
+  /* Hamburger visible on mobile */
+  .sidebar-hamburger {
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    width: 36px; height: 36px;
+    background: rgba(5,10,15,0.85);
+    border: 1px solid var(--border-bright);
+    border-radius: 4px;
+    cursor: pointer;
+    color: var(--accent-cyan);
+    flex-shrink: 0;
+  }
+
+  /* Sidebar becomes a full-height slide-over panel */
+  .sidebar-panel {
+    position: fixed !important;
+    top: 0; left: 0;
+    height: 100dvh !important;
+    width: 280px !important;
+    z-index: 300;
+    transform: translateX(-100%);
+    transition: transform 0.28s cubic-bezier(0.4,0,0.2,1);
+    overflow-y: auto;
+  }
+  .sidebar-panel.open {
+    transform: translateX(0);
+  }
+
+  /* Scrim behind open sidebar */
+  .sidebar-scrim {
+    display: block !important;
+    position: fixed;
+    inset: 0;
+    z-index: 299;
+    background: rgba(0,0,0,0.55);
+    backdrop-filter: blur(2px);
+  }
+
+  /* Hide top stats on small screens */
+  .header-stats { display: none !important; }
+  /* Shrink header text */
+  .header-title { font-size: 12px !important; letter-spacing: 0.12em !important; }
+  .header-subtitle { display: none !important; }
+
+  /* Touch-friendly map controls */
+  .map-ctrl-btn { width: 40px !important; height: 40px !important; }
+}
+
+@media (max-width: 480px) {
+  /* On very small screens, sidebar goes full-width */
+  .sidebar-panel { width: 100vw !important; }
+}
+
+/* Scrim hidden on desktop */
+.sidebar-scrim { display: none; }

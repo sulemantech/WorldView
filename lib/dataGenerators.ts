@@ -125,11 +125,12 @@ export const SHIP_DEFS: Omit<Ship, "lat" | "lon" | "heading">[] = [
   { id: "s13", name: "ALBATROSS K", type: "tanker", speed: 10, flag: "🇬🇷", color: "#ffd700" },
 ];
 
-// Ship initial positions in Persian Gulf / Arabian Sea area
+// Ship initial positions — all verified to be open water
+// [lat, lon]: Persian Gulf, Gulf of Oman, Arabian Sea, Red Sea
 export const SHIP_INITIAL_POSITIONS: [number, number][] = [
   [27.5, 56.5], [26.0, 54.0], [24.5, 59.0], [22.0, 63.0], [20.0, 65.0],
-  [24.0, 58.0], [23.0, 57.0], [26.5, 56.0], [28.0, 49.5], [30.0, 48.5],
-  [15.0, 72.0], [22.5, 60.5], [16.0, 43.5],
+  [24.0, 58.0], [23.0, 57.0], [26.5, 56.5], [27.5, 50.5], [27.0, 34.0],
+  [15.0, 72.0], [22.5, 60.5], [20.0, 38.0],
 ];
 
 export const SHIP_HEADINGS = [45, 270, 135, 90, 315, 200, 160, 350, 70, 180, 240, 120, 30];

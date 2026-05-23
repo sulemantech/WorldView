@@ -50,24 +50,27 @@ const CesiumGlobe = dynamic(() => import("@/components/CesiumGlobe"), {
   ),
 });
 
-// Cesium script loading state
+// Module-level flag survives re-renders but resets on HMR.
+// ensureCesium() always checks window.Cesium first so HMR resets never hang.
 let cesiumLoaded = false;
 let cesiumLoadCallbacks: (() => void)[] = [];
 
 function ensureCesium(): Promise<void> {
   return new Promise((resolve) => {
     if (typeof window === "undefined") return;
-    if (window.Cesium && cesiumLoaded) { resolve(); return; }
-    if (cesiumLoaded) { resolve(); return; }
 
+    // window.Cesium already present (covers HMR resets where cesiumLoaded is
+    // false but the script already ran and window.Cesium is populated).
+    if (window.Cesium) { cesiumLoaded = true; resolve(); return; }
+
+    // Script is loading — queue this resolve to fire when it finishes.
     cesiumLoadCallbacks.push(resolve);
 
+    // Script tag already injected by a previous call — just wait.
     if (document.getElementById("cesium-script")) return;
 
-    // Set base URL before loading
     (window as any).CESIUM_BASE_URL = "/cesium/";
 
-    // Load Cesium CSS
     const link = document.createElement("link");
     link.rel = "stylesheet";
     link.href = "/cesium/Widgets/widgets.css";
@@ -76,8 +79,16 @@ function ensureCesium(): Promise<void> {
     const script = document.createElement("script");
     script.id = "cesium-script";
     script.src = "https://cesium.com/downloads/cesiumjs/releases/1.122/Build/Cesium/Cesium.js";
+    // crossOrigin required for COEP credentialless — lets the browser apply
+    // CORS to the script fetch so SharedArrayBuffer workers are allowed.
+    script.crossOrigin = "anonymous";
     script.onload = () => {
       cesiumLoaded = true;
+      cesiumLoadCallbacks.forEach((cb) => cb());
+      cesiumLoadCallbacks = [];
+    };
+    script.onerror = () => {
+      console.error("[WORLDVIEW] Failed to load Cesium.js from CDN");
       cesiumLoadCallbacks.forEach((cb) => cb());
       cesiumLoadCallbacks = [];
     };
@@ -99,6 +110,7 @@ function formatLogTime(date: Date) {
 
 export default function WorldviewPage() {
   const [cesiumReady, setCesiumReady] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false); // starts closed; CSS keeps it visible on desktop
   const [mode, setMode] = useState<AppMode>("live");
   const [layers, setLayers] = useState<LayerVisibility>(DEFAULT_LAYERS);
   const [flights, setFlights] = useState<FlightTrack[]>([]);
@@ -433,6 +445,19 @@ export default function WorldviewPage() {
         flexShrink: 0,
         zIndex: 10,
       }}>
+        {/* Hamburger — only visible on mobile via CSS */}
+        <button
+          className="sidebar-hamburger"
+          onClick={() => setSidebarOpen(true)}
+          aria-label="Open menu"
+        >
+          <svg width="18" height="14" viewBox="0 0 18 14" fill="none">
+            <rect y="0"  width="18" height="2" rx="1" fill="currentColor"/>
+            <rect y="6"  width="18" height="2" rx="1" fill="currentColor"/>
+            <rect y="12" width="18" height="2" rx="1" fill="currentColor"/>
+          </svg>
+        </button>
+
         {/* Logo */}
         <div className="flex items-center gap-3">
           <div style={{
@@ -447,17 +472,17 @@ export default function WorldviewPage() {
             🌐
           </div>
           <div>
-            <div style={{ fontFamily: "var(--font-display)", fontSize: "15px", fontWeight: 700, color: "var(--accent-cyan)", letterSpacing: "0.2em" }}>
+            <div className="header-title" style={{ fontFamily: "var(--font-display)", fontSize: "15px", fontWeight: 700, color: "var(--accent-cyan)", letterSpacing: "0.2em" }}>
               WORLDVIEW
             </div>
-            <div style={{ fontFamily: "var(--font-mono)", fontSize: "8px", color: "var(--text-dim)", letterSpacing: "0.1em" }}>
+            <div className="header-subtitle" style={{ fontFamily: "var(--font-mono)", fontSize: "8px", color: "var(--text-dim)", letterSpacing: "0.1em" }}>
               4D OSINT COMMAND CENTER v1.0
             </div>
           </div>
         </div>
 
-        {/* Top Stats */}
-        <div className="flex items-center gap-6">
+        {/* Top Stats — hidden on mobile via CSS */}
+        <div className="header-stats flex items-center gap-6">
           {topStats.map(({ label, val, color }) => (
             <div key={label} className="flex flex-col items-center">
               <span style={{ fontFamily: "var(--font-display)", fontSize: "14px", color, fontWeight: 600 }}>{val}</span>
@@ -501,13 +526,15 @@ export default function WorldviewPage() {
           gpsZones={gpsZones}
           systemTime={systemTime}
           threatLevel={threatLevel}
+          isOpen={sidebarOpen}
+          onClose={() => setSidebarOpen(false)}
         />
 
         {/* Center: Globe + Controls */}
         <div className="flex flex-col flex-1 overflow-hidden" style={{ position: "relative" }}>
 
           {/* Globe */}
-          <div style={{ flex: 1, position: "relative" }}>
+          <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
             {cesiumReady && (
               <CesiumGlobe
                 flights={flights}
