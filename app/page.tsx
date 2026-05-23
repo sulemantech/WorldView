@@ -21,8 +21,8 @@ import {
 } from "@/lib/dataGenerators";
 import { DEFAULT_LAYERS } from "@/lib/cesiumHelpers";
 
-// Dynamically import Cesium globe (client only, no SSR)
-const CesiumGlobe = dynamic(() => import("@/components/CesiumGlobe"), {
+// Dynamically import CommandCenter (client only, no SSR)
+const CommandCenter = dynamic(() => import("@/components/CommandCenter"), {
   ssr: false,
   loading: () => (
     <div style={{
@@ -44,57 +44,11 @@ const CesiumGlobe = dynamic(() => import("@/components/CesiumGlobe"), {
         color: "var(--accent-cyan)",
         letterSpacing: "0.2em",
       }}>
-        INITIALIZING GLOBE...
+        INITIALIZING MAP...
       </span>
     </div>
   ),
 });
-
-// Module-level flag survives re-renders but resets on HMR.
-// ensureCesium() always checks window.Cesium first so HMR resets never hang.
-let cesiumLoaded = false;
-let cesiumLoadCallbacks: (() => void)[] = [];
-
-function ensureCesium(): Promise<void> {
-  return new Promise((resolve) => {
-    if (typeof window === "undefined") return;
-
-    // window.Cesium already present (covers HMR resets where cesiumLoaded is
-    // false but the script already ran and window.Cesium is populated).
-    if (window.Cesium) { cesiumLoaded = true; resolve(); return; }
-
-    // Script is loading — queue this resolve to fire when it finishes.
-    cesiumLoadCallbacks.push(resolve);
-
-    // Script tag already injected by a previous call — just wait.
-    if (document.getElementById("cesium-script")) return;
-
-    (window as any).CESIUM_BASE_URL = "/cesium/";
-
-    const link = document.createElement("link");
-    link.rel = "stylesheet";
-    link.href = "/cesium/Widgets/widgets.css";
-    document.head.appendChild(link);
-
-    const script = document.createElement("script");
-    script.id = "cesium-script";
-    script.src = "https://cesium.com/downloads/cesiumjs/releases/1.122/Build/Cesium/Cesium.js";
-    // crossOrigin required for COEP credentialless — lets the browser apply
-    // CORS to the script fetch so SharedArrayBuffer workers are allowed.
-    script.crossOrigin = "anonymous";
-    script.onload = () => {
-      cesiumLoaded = true;
-      cesiumLoadCallbacks.forEach((cb) => cb());
-      cesiumLoadCallbacks = [];
-    };
-    script.onerror = () => {
-      console.error("[WORLDVIEW] Failed to load Cesium.js from CDN");
-      cesiumLoadCallbacks.forEach((cb) => cb());
-      cesiumLoadCallbacks = [];
-    };
-    document.head.appendChild(script);
-  });
-}
 
 function generateId() {
   return Math.random().toString(36).slice(2, 9);
@@ -109,7 +63,6 @@ function formatLogTime(date: Date) {
 }
 
 export default function WorldviewPage() {
-  const [cesiumReady, setCesiumReady] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false); // starts closed; CSS keeps it visible on desktop
   const [mode, setMode] = useState<AppMode>("live");
   const [layers, setLayers] = useState<LayerVisibility>(DEFAULT_LAYERS);
@@ -137,11 +90,6 @@ export default function WorldviewPage() {
 
   // Track last triggered playback events
   const triggeredEventsRef = useRef<Set<string>>(new Set());
-
-  // ─── Load Cesium ───────────────────────────────────────────────────────────
-  useEffect(() => {
-    ensureCesium().then(() => setCesiumReady(true));
-  }, []);
 
   // ─── Initialize data ───────────────────────────────────────────────────────
   useEffect(() => {
@@ -533,46 +481,21 @@ export default function WorldviewPage() {
         {/* Center: Globe + Controls */}
         <div className="flex flex-col flex-1 overflow-hidden" style={{ position: "relative" }}>
 
-          {/* Globe */}
+          {/* Map */}
           <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
-            {cesiumReady && (
-              <CesiumGlobe
-                flights={flights}
-                ships={ships}
-                satellites={satellites}
-                gpsZones={gpsZones}
-                noFlyZones={noFlyZones}
-                events={events}
-                layers={layers}
-                onTooltip={setTooltip}
-                onEntityClick={(type, id) => {
-                  addLog("ai", `Entity selected: [${type.toUpperCase()}] ${id}`);
-                }}
-              />
-            )}
-
-            {/* Cesium loading overlay */}
-            {!cesiumReady && (
-              <div style={{
-                position: "absolute", inset: 0,
-                display: "flex", alignItems: "center", justifyContent: "center",
-                flexDirection: "column", gap: "20px",
-                background: "var(--bg-dark)",
-              }}>
-                <div style={{
-                  width: "80px", height: "80px", borderRadius: "50%",
-                  border: "2px solid var(--border-bright)",
-                  borderTop: "2px solid var(--accent-cyan)",
-                  animation: "radar-sweep 1s linear infinite",
-                }} />
-                <div style={{
-                  fontFamily: "var(--font-display)", fontSize: "14px",
-                  color: "var(--accent-cyan)", letterSpacing: "0.2em",
-                }}>
-                  LOADING CESIUM GLOBE...
-                </div>
-              </div>
-            )}
+            <CommandCenter
+              flights={flights}
+              ships={ships}
+              satellites={satellites}
+              gpsZones={gpsZones}
+              noFlyZones={noFlyZones}
+              events={events}
+              layers={layers}
+              onTooltip={setTooltip}
+              onEntityClick={(type, id) => {
+                addLog("ai", `Entity selected: [${type.toUpperCase()}] ${id}`);
+              }}
+            />
 
             {/* Corner decorations */}
             <div style={{

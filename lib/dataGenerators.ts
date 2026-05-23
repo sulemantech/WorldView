@@ -175,7 +175,7 @@ export const GPS_JAM_ZONES_INITIAL: GpsJamZone[] = [
 export const NO_FLY_ZONES: NoFlyZone[] = [
   {
     id: "nfz01",
-    name: "IRAN ADIZ — RESTRICTED",
+    name: "IRAN ADIZ - RESTRICTED",
     active: false, // activated at T+15
     polygon: [
       [44, 25], [63, 25], [63, 40], [44, 40], [44, 25]
