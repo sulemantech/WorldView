@@ -1,0 +1,234 @@
+@import "tailwindcss";
+
+:root {
+  --bg-dark: #050a0f;
+  --bg-panel: #0a1520;
+  --bg-panel-hover: #0d1c2e;
+  --border: #1a3a5c;
+  --border-bright: #1e5080;
+  --accent-cyan: #00d4ff;
+  --accent-green: #00ff9d;
+  --accent-red: #ff3366;
+  --accent-orange: #ff8c00;
+  --accent-yellow: #ffd700;
+  --accent-purple: #9b59ff;
+  --text-primary: #e0f4ff;
+  --text-secondary: #7ab8d4;
+  --text-dim: #3d7a9e;
+  --font-mono: 'Space Mono', 'Courier New', monospace;
+  --font-display: 'Orbitron', 'Share Tech Mono', sans-serif;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg-dark);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: var(--bg-dark); }
+::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 2px; }
+
+/* Cesium overrides */
+#cesiumContainer {
+  width: 100%;
+  height: 100%;
+  position: absolute;
+  top: 0; left: 0;
+}
+
+.cesium-widget-credits,
+.cesium-credit-logoContainer,
+.cesium-credit-expand-link {
+  display: none !important;
+}
+
+/* Animation keyframes */
+@keyframes pulse-ring {
+  0% { transform: scale(0.8); opacity: 1; }
+  100% { transform: scale(2.5); opacity: 0; }
+}
+@keyframes scan-line {
+  0% { top: -2px; }
+  100% { top: 100%; }
+}
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.2; }
+}
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes radar-sweep {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+@keyframes data-scroll {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+
+.blink { animation: blink 1.2s ease-in-out infinite; }
+.fade-in-up { animation: fadeInUp 0.3s ease forwards; }
+
+/* Glass panels */
+.glass-panel {
+  background: rgba(10, 21, 32, 0.92);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(12px);
+}
+.glass-panel-bright {
+  background: rgba(10, 21, 32, 0.96);
+  border: 1px solid var(--border-bright);
+  backdrop-filter: blur(16px);
+}
+
+/* Neon glow effects */
+.glow-cyan { text-shadow: 0 0 10px var(--accent-cyan), 0 0 20px var(--accent-cyan); }
+.glow-green { text-shadow: 0 0 10px var(--accent-green), 0 0 20px var(--accent-green); }
+.glow-red { text-shadow: 0 0 10px var(--accent-red), 0 0 20px var(--accent-red); }
+.border-glow-cyan { box-shadow: 0 0 8px rgba(0, 212, 255, 0.3), inset 0 0 8px rgba(0, 212, 255, 0.05); }
+.border-glow-red { box-shadow: 0 0 8px rgba(255, 51, 102, 0.4), inset 0 0 8px rgba(255, 51, 102, 0.05); }
+
+/* Corner decorations */
+.corner-tl::before, .corner-tr::after {
+  content: '';
+  position: absolute;
+  width: 12px; height: 12px;
+  border-color: var(--accent-cyan);
+  border-style: solid;
+}
+.corner-tl::before { top: 0; left: 0; border-width: 2px 0 0 2px; }
+.corner-tr::after { top: 0; right: 0; border-width: 2px 2px 0 0; }
+
+/* Status dot */
+.status-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+.status-dot.live {
+  background: var(--accent-green);
+  box-shadow: 0 0 6px var(--accent-green);
+  animation: blink 1s ease infinite;
+}
+.status-dot.warning {
+  background: var(--accent-orange);
+  box-shadow: 0 0 6px var(--accent-orange);
+  animation: blink 0.8s ease infinite;
+}
+.status-dot.danger {
+  background: var(--accent-red);
+  box-shadow: 0 0 6px var(--accent-red);
+  animation: blink 0.5s ease infinite;
+}
+.status-dot.inactive {
+  background: var(--text-dim);
+}
+
+/* Tooltip */
+.tooltip {
+  position: fixed;
+  z-index: 9999;
+  pointer-events: none;
+  background: rgba(5, 10, 15, 0.97);
+  border: 1px solid var(--accent-cyan);
+  box-shadow: 0 0 20px rgba(0, 212, 255, 0.2);
+  border-radius: 4px;
+  padding: 10px 14px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  min-width: 180px;
+  max-width: 280px;
+}
+
+/* Range slider custom */
+input[type=range] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+input[type=range]::-webkit-slider-runnable-track {
+  height: 3px;
+  background: linear-gradient(to right, var(--accent-cyan) var(--progress, 0%), var(--border) var(--progress, 0%));
+  border-radius: 2px;
+}
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  background: var(--accent-cyan);
+  box-shadow: 0 0 8px var(--accent-cyan);
+  margin-top: -5.5px;
+  border: 2px solid var(--bg-dark);
+}
+input[type=range]:focus { outline: none; }
+
+/* Toggle checkbox */
+.toggle-checkbox {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  gap: 8px;
+}
+.toggle-checkbox input { display: none; }
+.toggle-track {
+  width: 32px; height: 17px;
+  background: var(--border);
+  border-radius: 9px;
+  position: relative;
+  transition: background 0.2s;
+  flex-shrink: 0;
+}
+.toggle-track::after {
+  content: '';
+  position: absolute;
+  top: 2.5px; left: 2.5px;
+  width: 12px; height: 12px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  transition: transform 0.2s, background 0.2s;
+}
+.toggle-checkbox input:checked ~ .toggle-track {
+  background: rgba(0, 212, 255, 0.2);
+  border: 1px solid var(--accent-cyan);
+}
+.toggle-checkbox input:checked ~ .toggle-track::after {
+  transform: translateX(15px);
+  background: var(--accent-cyan);
+  box-shadow: 0 0 6px var(--accent-cyan);
+}
+
+/* Scrolling ticker */
+.ticker-wrap {
+  overflow: hidden;
+  white-space: nowrap;
+}
+.ticker-content {
+  display: inline-block;
+  animation: data-scroll 40s linear infinite;
+}
+
+/* Log panel */
+.log-entry {
+  animation: fadeInUp 0.25s ease forwards;
+  border-left: 2px solid transparent;
+  padding-left: 8px;
+}
+.log-entry.strike { border-color: var(--accent-red); }
+.log-entry.nfz { border-color: var(--accent-orange); }
+.log-entry.satellite { border-color: var(--accent-green); }
+.log-entry.flight { border-color: #4488ff; }
+.log-entry.ship { border-color: var(--accent-yellow); }
+.log-entry.gps { border-color: var(--accent-purple); }
+.log-entry.ai { border-color: var(--accent-cyan); }
+.log-entry.system { border-color: var(--text-dim); }
