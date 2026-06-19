@@ -525,7 +525,7 @@ export default function CommandCenter({
           getColor: (d: Ship): RGBA => SHIP_COLORS[d.type] ?? C.cargo,
           getAngle: (d: Ship) => -d.heading,
           pickable: true,
-          transitions: { getPosition: 2000 },
+          transitions: { getPosition: 450 },
         }),
         new TextLayer({
           id: "sh-labels",
@@ -570,7 +570,7 @@ export default function CommandCenter({
           getColor: satColor,
           getAngle: 0,
           pickable: true,
-          transitions: { getPosition: 2000 },
+          transitions: { getPosition: 450 },
         }),
         new TextLayer({
           id: "sat-labels",
@@ -679,7 +679,7 @@ export default function CommandCenter({
           getColor: (d: FlightTrack): RGBA => d.diverted ? C.diverted : C.commercial,
           getAngle: (d: FlightTrack) => -d.heading,
           pickable: true,
-          transitions: { getPosition: 1500 },
+          transitions: { getPosition: 450, getAngle: 450 },
         }),
       );
     }
@@ -697,7 +697,7 @@ export default function CommandCenter({
           getColor: (): RGBA => C.military,
           getAngle: (d: FlightTrack) => -d.heading,
           pickable: true,
-          transitions: { getPosition: 1500 },
+          transitions: { getPosition: 450, getAngle: 450 },
         }),
         new TextLayer({
           id: "fl-mil-labels",

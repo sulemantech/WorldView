@@ -11,6 +11,7 @@ import EventLog, { LogEntry } from "@/components/EventLog";
 import PlaybackControls from "@/components/PlaybackControls";
 import AIAgentPanel from "@/components/AIAgentPanel";
 import Tooltip from "@/components/Tooltip";
+import { useAISStream } from "@/hooks/useAISStream";
 import type { AppMode, LayerVisibility } from "@/lib/cesiumHelpers";
 import {
   FlightTrack, Ship, Satellite, GpsJamZone, NoFlyZone, EventMarker,
@@ -87,9 +88,17 @@ export default function WorldviewPage() {
   const playbackRef = useRef({ time: 0, playing: false, speed: 5 });
   const liveIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const playbackIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // True when live mode + AISstream API key is configured — suppresses simulated ship animation
+  const useRealAISRef = useRef(false);
 
   // Track last triggered playback events
   const triggeredEventsRef = useRef<Set<string>>(new Set());
+
+  // ─── AISstream.io live vessel feed ───────────────────────────────────────
+  const aisEnabled = mode === "live" && !!process.env.NEXT_PUBLIC_AISSTREAM_API_KEY;
+  const { ships: aisShips, connected: aisConnected } = useAISStream(aisEnabled);
+  // When real AIS data is flowing, use it; otherwise fall back to simulated ships
+  const displayShips = aisEnabled && aisShips.length > 0 ? aisShips : ships;
 
   // ─── Initialize data ───────────────────────────────────────────────────────
   useEffect(() => {
@@ -106,7 +115,11 @@ export default function WorldviewPage() {
     addLog("system", "WORLDVIEW OSINT platform initialized");
     addLog("ai", "Sensor fusion engine online — all feeds active");
     addLog("flight", `ADS-B: ${f.length} tracks ingested`);
-    addLog("ship", `AIS: ${s.length} vessels tracked`);
+    if (process.env.NEXT_PUBLIC_AISSTREAM_API_KEY) {
+      addLog("ship", "AIS: Live feed via AISstream.io — connecting to Persian Gulf AOI...");
+    } else {
+      addLog("ship", `AIS: ${s.length} vessels simulated`);
+    }
     addLog("satellite", `Space tracking: ${sat.length} objects indexed`);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -119,12 +132,27 @@ export default function WorldviewPage() {
     return () => clearInterval(t);
   }, []);
 
+  // Keep ref in sync so the animation interval can read it without stale closure
+  useEffect(() => {
+    useRealAISRef.current = aisEnabled;
+  }, [aisEnabled]);
+
+  // Log AIS connection transitions
+  useEffect(() => {
+    if (!aisEnabled) return;
+    if (aisConnected) {
+      addLog("ship", "AISstream.io: Live AIS feed connected — real vessel positions active");
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aisConnected]);
+
   // ─── Live Mode: animate data ──────────────────────────────────────────────
   const startLiveMode = useCallback(() => {
     if (liveIntervalRef.current) clearInterval(liveIntervalRef.current);
 
     liveIntervalRef.current = setInterval(() => {
-      const dt = 0.002 / 60; // 2s / 1hr (flight crosses world in ~1hr)
+      // dt at 500ms interval: ~15–25 km per tick for a 600-kt aircraft → clearly visible at zoom 5-6
+      const dt = 0.0025;
 
       // Animate flights
       setFlights((prev) => {
@@ -140,32 +168,34 @@ export default function WorldviewPage() {
         return next;
       });
 
-      // Animate ships (much slower)
-      setShips((prev) => {
-        const next = prev.map((s) => {
-          const dtShip = 0.00002 * s.speed;
-          const latDelta = Math.cos((s.heading * Math.PI) / 180) * dtShip;
-          const lonDelta = Math.sin((s.heading * Math.PI) / 180) * dtShip;
-          let lat = s.lat + latDelta;
-          let lon = s.lon + lonDelta;
-          // Bounce heading if out of Gulf region
-          let heading = s.heading;
-          if (lat > 30 || lat < 12 || lon > 70 || lon < 40) {
-            heading = (heading + 180) % 360;
-            lat = Math.max(13, Math.min(29, lat));
-            lon = Math.max(41, Math.min(69, lon));
-          }
-          return { ...s, lat, lon, heading };
+      // Animate ships (simulated only — skipped when AISstream.io is providing real positions)
+      if (!useRealAISRef.current) {
+        setShips((prev) => {
+          const next = prev.map((s) => {
+            const dtShip = 0.0015 * s.speed; // ~1–4 km per tick → visible at Gulf zoom level
+            const latDelta = Math.cos((s.heading * Math.PI) / 180) * dtShip;
+            const lonDelta = Math.sin((s.heading * Math.PI) / 180) * dtShip;
+            let lat = s.lat + latDelta;
+            let lon = s.lon + lonDelta;
+            // Bounce heading if out of Gulf region
+            let heading = s.heading;
+            if (lat > 30 || lat < 12 || lon > 70 || lon < 40) {
+              heading = (heading + 180) % 360;
+              lat = Math.max(13, Math.min(29, lat));
+              lon = Math.max(41, Math.min(69, lon));
+            }
+            return { ...s, lat, lon, heading };
+          });
+          shipsRef.current = next;
+          return next;
         });
-        shipsRef.current = next;
-        return next;
-      });
+      }
 
-      // Animate satellites
+      // Animate satellites (0.5 = 500ms per step at real orbital speed)
       setSatellites((prev) => {
-        const next = prev.map((sat, i) => {
-          const dt_sat = 1 / (sat.period * 60); // progress per second / 2s interval
-          const t = (sat.t + dt_sat * 2) % 1;
+        const next = prev.map((sat) => {
+          const dt_sat = 1 / (sat.period * 60);
+          const t = (sat.t + dt_sat * 0.5) % 1;
           const [lat, lon] = satPosition(sat, t);
           return { ...sat, lat, lon, t };
         });
@@ -179,7 +209,7 @@ export default function WorldviewPage() {
         intensity: Math.max(0.1, Math.min(1, z.intensity + (Math.random() - 0.5) * 0.05)),
       })));
 
-    }, 2000);
+    }, 500); // 500ms: 4× more updates; deck.gl transitions interpolate to 60fps in between
 
     return () => {
       if (liveIntervalRef.current) clearInterval(liveIntervalRef.current);
@@ -376,7 +406,7 @@ export default function WorldviewPage() {
   // ─── Header bar top stats ────────────────────────────────────────────────
   const topStats = [
     { label: "TRACKS", val: flights.length, color: "#4488ff" },
-    { label: "VESSELS", val: ships.length, color: "#ffd700" },
+    { label: "VESSELS", val: displayShips.length, color: "#ffd700" },
     { label: "SATELLITES", val: satellites.length, color: "#00ff9d" },
     { label: "JAM ZONES", val: gpsZones.length, color: "#ff3366" },
     { label: "NFZ ACTIVE", val: noFlyZones.filter(z => z.active).length, color: "#ff8c00" },
@@ -485,7 +515,7 @@ export default function WorldviewPage() {
           <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
             <CommandCenter
               flights={flights}
-              ships={ships}
+              ships={displayShips}
               satellites={satellites}
               gpsZones={gpsZones}
               noFlyZones={noFlyZones}

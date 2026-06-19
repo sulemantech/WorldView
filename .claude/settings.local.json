@@ -5,7 +5,12 @@
       "Bash(npm run *)",
       "Bash(Get-Item \"c:\\\\Users\\\\HP\\\\Downloads\\\\worldview-complete\\\\worldview\\\\public\\\\countries.geojson\")",
       "Bash(Select-Object Length)",
-      "PowerShell(\\(Get-Item \"c:\\\\Users\\\\HP\\\\Downloads\\\\worldview-complete\\\\worldview\\\\public\\\\countries.geojson\"\\).Length / 1MB)"
+      "PowerShell(\\(Get-Item \"c:\\\\Users\\\\HP\\\\Downloads\\\\worldview-complete\\\\worldview\\\\public\\\\countries.geojson\"\\).Length / 1MB)",
+      "Bash(mkdir \"d:/Projects/WorldView/hooks\")",
+      "Bash(npx vercel *)"
+    ],
+    "additionalDirectories": [
+      "d:\\Projects\\WorldView"
     ]
   }
 }
