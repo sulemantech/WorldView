@@ -92,8 +92,6 @@ export default function WorldviewPage() {
   const playbackIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // True when live mode + AISstream API key is configured — suppresses simulated ship animation
   const useRealAISRef = useRef(false);
-  // True when OpenSky real flight data is flowing — suppresses simulated flight animation
-  const useRealFlightsRef = useRef(false);
   // True when Celestrak real satellite data is flowing — suppresses simulated orbital animation
   const useRealSatsRef = useRef(false);
 
@@ -106,8 +104,6 @@ export default function WorldviewPage() {
   // ─── Celestrak real satellite positions ──────────────────────────────────
   const celestrakSats = useCelestrakSatellites(mode === "live");
   const displaySatellites = celestrakSats.length > 0 ? celestrakSats : satellites;
-  // When OpenSky returns data use it; fall back to simulated flights otherwise
-  const displayFlights = openskyFlights.length > 0 ? openskyFlights : flights;
 
   // ─── AISstream.io live vessel feed ───────────────────────────────────────
   const aisEnabled = mode === "live" && !!process.env.NEXT_PUBLIC_AISSTREAM_API_KEY;
@@ -147,10 +143,22 @@ export default function WorldviewPage() {
     return () => clearInterval(t);
   }, []);
 
-  // Sync OpenSky ref so animation interval can check it without stale closure
+  // ─── Merge OpenSky real flights into flights state ───────────────────────
+  // Keeps simulated military flights (origin ≠ destination) alongside real commercial data.
+  // Never falls back to stale simulated positions — real flights dead-reckon in the
+  // animation loop between 10-second OpenSky polls.
   useEffect(() => {
-    useRealFlightsRef.current = openskyFlights.length > 0 && mode === "live";
-  }, [openskyFlights.length, mode]);
+    if (openskyFlights.length === 0 || mode !== "live") return;
+    setFlights((prev) => {
+      // Real OpenSky flights have origin === destination (no route data).
+      // Keep the simulated military flights which DO have real origin/destination paths.
+      const simulated = prev.filter(
+        (f) => f.origin[0] !== f.destination[0] || f.origin[1] !== f.destination[1]
+      );
+      return [...simulated, ...openskyFlights];
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openskyFlights]);
 
   // Log when OpenSky delivers its first batch, and on subsequent refreshes
   const prevFlightCountRef = useRef(0);
@@ -201,21 +209,34 @@ export default function WorldviewPage() {
       // dt at 500ms interval: ~15–25 km per tick for a 600-kt aircraft → clearly visible at zoom 5-6
       const dt = 0.0025;
 
-      // Animate flights (simulated only — skipped when OpenSky is providing real ADS-B positions)
-      if (!useRealFlightsRef.current) {
-        setFlights((prev) => {
-          const next = prev.map((f) => {
-            let prog = f.progress + dt * (f.speed / 800);
-            if (prog >= 1) prog = 0; // loop
-            const target = f.diverted && f.divertTarget ? f.divertTarget : f.destination;
-            const [lat, lon] = interpolatePath(f.origin, target, prog);
-            const hdg = bearing([f.lat, f.lon], [lat, lon]);
-            return { ...f, lat, lon, heading: hdg, progress: prog };
-          });
-          flightsRef.current = next;
-          return next;
+      // Animate ALL flights every 500ms:
+      //  • Real (OpenSky): dead-reckon with current heading + speed between 10s polls
+      //  • Simulated (military): follow interpolatePath toward destination as before
+      setFlights((prev) => {
+        const next = prev.map((f) => {
+          // Real OpenSky flights have origin === destination (no route data from ADS-B)
+          const isReal = f.origin[0] === f.destination[0] && f.origin[1] === f.destination[1];
+          if (isReal) {
+            // Dead-reckon: knots → degrees of lat/lon per 500ms step
+            const dtH = 0.5 / 3600;                         // 500 ms in hours
+            const distDeg = (f.speed * dtH) / 60;           // 1° ≈ 60 nm
+            const hdgRad = (f.heading * Math.PI) / 180;
+            const cosLat = Math.cos((f.lat * Math.PI) / 180) || 1;
+            const lat = f.lat + Math.cos(hdgRad) * distDeg;
+            const lon = f.lon + Math.sin(hdgRad) * distDeg / cosLat;
+            return { ...f, lat, lon };
+          }
+          // Simulated: interpolate along origin→destination path
+          let prog = f.progress + dt * (f.speed / 800);
+          if (prog >= 1) prog = 0;
+          const target = f.diverted && f.divertTarget ? f.divertTarget : f.destination;
+          const [lat, lon] = interpolatePath(f.origin, target, prog);
+          const hdg = bearing([f.lat, f.lon], [lat, lon]);
+          return { ...f, lat, lon, heading: hdg, progress: prog };
         });
-      }
+        flightsRef.current = next;
+        return next;
+      });
 
       // Animate ships (simulated only — skipped when AISstream.io is providing real positions)
       if (!useRealAISRef.current) {
@@ -502,7 +523,7 @@ export default function WorldviewPage() {
 
   // ─── Header bar top stats ────────────────────────────────────────────────
   const topStats = [
-    { label: "TRACKS", val: displayFlights.length, color: "#4488ff" },
+    { label: "TRACKS", val: flights.length, color: "#4488ff" },
     { label: "VESSELS", val: displayShips.length, color: "#ffd700" },
     { label: "SATELLITES", val: displaySatellites.length, color: "#00ff9d" },
     { label: "JAM ZONES", val: gpsZones.length, color: "#ff3366" },
@@ -611,7 +632,7 @@ export default function WorldviewPage() {
           {/* Map */}
           <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
             <CommandCenter
-              flights={displayFlights}
+              flights={flights}
               ships={displayShips}
               satellites={displaySatellites}
               gpsZones={gpsZones}
@@ -634,9 +655,9 @@ export default function WorldviewPage() {
                 color: "var(--accent-cyan)", opacity: 0.6,
                 lineHeight: 1.8,
               }}>
-                <div>LAT: {displayFlights[0]?.lat.toFixed(4) || "—"}°N</div>
-                <div>LON: {displayFlights[0]?.lon.toFixed(4) || "—"}°E</div>
-                <div>ALT: {(displayFlights[0]?.altitude || 0).toLocaleString()} FT</div>
+                <div>LAT: {flights[0]?.lat.toFixed(4) || "—"}°N</div>
+                <div>LON: {flights[0]?.lon.toFixed(4) || "—"}°E</div>
+                <div>ALT: {(flights[0]?.altitude || 0).toLocaleString()} FT</div>
               </div>
             </div>
 
