@@ -17,7 +17,6 @@ import { useCelestrakSatellites } from "@/hooks/useCelestrakSatellites";
 import type { AppMode, LayerVisibility } from "@/lib/cesiumHelpers";
 import {
   FlightTrack, Ship, Satellite, GpsJamZone, NoFlyZone, EventMarker,
-  initializeFlights, initializeShips, initializeSatellites,
   GPS_JAM_ZONES_INITIAL, NO_FLY_ZONES, PLAYBACK_EVENTS,
   interpolatePath, bearing, satPosition,
   COMMERCIAL_FLIGHT_DEFS, MILITARY_FLIGHT_DEFS, SATELLITE_DEFS,
@@ -72,8 +71,8 @@ export default function WorldviewPage() {
   const [flights, setFlights] = useState<FlightTrack[]>([]);
   const [ships, setShips] = useState<Ship[]>([]);
   const [satellites, setSatellites] = useState<Satellite[]>([]);
-  const [gpsZones, setGpsZones] = useState<GpsJamZone[]>(GPS_JAM_ZONES_INITIAL);
-  const [noFlyZones, setNoFlyZones] = useState<NoFlyZone[]>(NO_FLY_ZONES);
+  const [gpsZones, setGpsZones] = useState<GpsJamZone[]>([]);
+  const [noFlyZones, setNoFlyZones] = useState<NoFlyZone[]>([]);
   const [events, setEvents] = useState<EventMarker[]>(PLAYBACK_EVENTS.map(e => ({ ...e, active: false })));
   const [logEntries, setLogEntries] = useState<LogEntry[]>([]);
   const [tooltip, setTooltip] = useState<{ x: number; y: number; title: string; rows: [string, string][] } | null>(null);
@@ -109,29 +108,18 @@ export default function WorldviewPage() {
   const aisEnabled = mode === "live" && !!process.env.NEXT_PUBLIC_AISSTREAM_API_KEY;
   const { ships: aisShips, connected: aisConnected } = useAISStream(aisEnabled);
   // When real AIS data is flowing, use it; otherwise fall back to simulated ships
-  const displayShips = aisEnabled && aisShips.length > 0 ? aisShips : ships;
+  const displayShips = aisEnabled ? aisShips : [];
 
   // ─── Initialize data ───────────────────────────────────────────────────────
   useEffect(() => {
-    const f = initializeFlights();
-    const s = initializeShips();
-    const sat = initializeSatellites();
-    setFlights(f);
-    setShips(s);
-    setSatellites(sat);
-    flightsRef.current = f;
-    shipsRef.current = s;
-    satsRef.current = sat;
-
-    addLog("system", "WORLDVIEW OSINT platform initialized");
-    addLog("ai", "Sensor fusion engine online — all feeds active");
-    addLog("flight", `ADS-B: fetching live tracks from OpenSky Network...`);
+    addLog("system", "WORLDVIEW OSINT platform initialized — live feeds only");
+    addLog("flight", "ADS-B: connecting to OpenSky Network...");
     if (process.env.NEXT_PUBLIC_AISSTREAM_API_KEY) {
-      addLog("ship", "AIS: Live feed via AISstream.io — connecting to Persian Gulf AOI...");
+      addLog("ship", "AIS: connecting to AISstream.io — Persian Gulf AOI...");
     } else {
-      addLog("ship", `AIS: ${s.length} vessels simulated`);
+      addLog("ship", "AIS: no API key — vessel layer offline");
     }
-    addLog("satellite", `Space tracking: ${sat.length} objects indexed`);
+    addLog("satellite", "Celestrak TLE: fetching orbital elements...");
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -238,28 +226,7 @@ export default function WorldviewPage() {
         return next;
       });
 
-      // Animate ships (simulated only — skipped when AISstream.io is providing real positions)
-      if (!useRealAISRef.current) {
-        setShips((prev) => {
-          const next = prev.map((s) => {
-            const dtShip = 0.0015 * s.speed; // ~1–4 km per tick → visible at Gulf zoom level
-            const latDelta = Math.cos((s.heading * Math.PI) / 180) * dtShip;
-            const lonDelta = Math.sin((s.heading * Math.PI) / 180) * dtShip;
-            let lat = s.lat + latDelta;
-            let lon = s.lon + lonDelta;
-            // Bounce heading if out of Gulf region
-            let heading = s.heading;
-            if (lat > 30 || lat < 12 || lon > 70 || lon < 40) {
-              heading = (heading + 180) % 360;
-              lat = Math.max(13, Math.min(29, lat));
-              lon = Math.max(41, Math.min(69, lon));
-            }
-            return { ...s, lat, lon, heading };
-          });
-          shipsRef.current = next;
-          return next;
-        });
-      }
+      // Ships: AISstream.io updates positions directly; no simulated movement needed
 
       // Animate satellites (simulated only — skipped when Celestrak SGP4 is active)
       if (!useRealSatsRef.current) {
@@ -275,11 +242,7 @@ export default function WorldviewPage() {
         });
       }
 
-      // Randomly vary GPS jamming intensity
-      setGpsZones((prev) => prev.map((z) => ({
-        ...z,
-        intensity: Math.max(0.1, Math.min(1, z.intensity + (Math.random() - 0.5) * 0.05)),
-      })));
+      // GPS jamming zones: real data only — no simulated intensity noise
 
     }, 500); // 500ms: 4× more updates; deck.gl transitions interpolate to 60fps in between
 
@@ -318,7 +281,7 @@ export default function WorldviewPage() {
             flightCount: flightsRef.current.length,
             shipCount:   shipsRef.current.length,
             satCount:    satsRef.current.length,
-            jamZones:    GPS_JAM_ZONES_INITIAL.length,
+            jamZones:    gpsZones.length,
             threatLevel: 'YELLOW',
           }),
           signal: abortCtrl.signal,
@@ -370,9 +333,16 @@ export default function WorldviewPage() {
       if (playbackIntervalRef.current) clearInterval(playbackIntervalRef.current);
       setIsPlaying(false);
 
-      // Reset events
+      // Reset events, clear simulated overlays
       setEvents(PLAYBACK_EVENTS.map(e => ({ ...e, active: false })));
-      setNoFlyZones(NO_FLY_ZONES.map(z => ({ ...z })));
+      setNoFlyZones([]);
+      setGpsZones([]);
+      setFlights([]);
+      setShips([]);
+      setSatellites([]);
+      flightsRef.current = [];
+      shipsRef.current = [];
+      satsRef.current = [];
 
       // Start live animation
       startLiveMode();
