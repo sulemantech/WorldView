@@ -12,12 +12,14 @@ import PlaybackControls from "@/components/PlaybackControls";
 import AIAgentPanel from "@/components/AIAgentPanel";
 import Tooltip from "@/components/Tooltip";
 import { useAISStream } from "@/hooks/useAISStream";
+import { useOpenSkyFlights } from "@/hooks/useOpenSkyFlights";
+import { useCelestrakSatellites } from "@/hooks/useCelestrakSatellites";
 import type { AppMode, LayerVisibility } from "@/lib/cesiumHelpers";
 import {
   FlightTrack, Ship, Satellite, GpsJamZone, NoFlyZone, EventMarker,
   initializeFlights, initializeShips, initializeSatellites,
   GPS_JAM_ZONES_INITIAL, NO_FLY_ZONES, PLAYBACK_EVENTS,
-  AI_AGENT_MESSAGES, interpolatePath, bearing, satPosition,
+  interpolatePath, bearing, satPosition,
   COMMERCIAL_FLIGHT_DEFS, MILITARY_FLIGHT_DEFS, SATELLITE_DEFS,
 } from "@/lib/dataGenerators";
 import { DEFAULT_LAYERS } from "@/lib/cesiumHelpers";
@@ -90,9 +92,22 @@ export default function WorldviewPage() {
   const playbackIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // True when live mode + AISstream API key is configured — suppresses simulated ship animation
   const useRealAISRef = useRef(false);
+  // True when OpenSky real flight data is flowing — suppresses simulated flight animation
+  const useRealFlightsRef = useRef(false);
+  // True when Celestrak real satellite data is flowing — suppresses simulated orbital animation
+  const useRealSatsRef = useRef(false);
 
   // Track last triggered playback events
   const triggeredEventsRef = useRef<Set<string>>(new Set());
+
+  // ─── OpenSky Network real flight data ────────────────────────────────────
+  const { flights: openskyFlights } = useOpenSkyFlights(mode === "live");
+
+  // ─── Celestrak real satellite positions ──────────────────────────────────
+  const celestrakSats = useCelestrakSatellites(mode === "live");
+  const displaySatellites = celestrakSats.length > 0 ? celestrakSats : satellites;
+  // When OpenSky returns data use it; fall back to simulated flights otherwise
+  const displayFlights = openskyFlights.length > 0 ? openskyFlights : flights;
 
   // ─── AISstream.io live vessel feed ───────────────────────────────────────
   const aisEnabled = mode === "live" && !!process.env.NEXT_PUBLIC_AISSTREAM_API_KEY;
@@ -114,7 +129,7 @@ export default function WorldviewPage() {
 
     addLog("system", "WORLDVIEW OSINT platform initialized");
     addLog("ai", "Sensor fusion engine online — all feeds active");
-    addLog("flight", `ADS-B: ${f.length} tracks ingested`);
+    addLog("flight", `ADS-B: fetching live tracks from OpenSky Network...`);
     if (process.env.NEXT_PUBLIC_AISSTREAM_API_KEY) {
       addLog("ship", "AIS: Live feed via AISstream.io — connecting to Persian Gulf AOI...");
     } else {
@@ -131,6 +146,38 @@ export default function WorldviewPage() {
     const t = setInterval(tick, 1000);
     return () => clearInterval(t);
   }, []);
+
+  // Sync OpenSky ref so animation interval can check it without stale closure
+  useEffect(() => {
+    useRealFlightsRef.current = openskyFlights.length > 0 && mode === "live";
+  }, [openskyFlights.length, mode]);
+
+  // Log when OpenSky delivers its first batch, and on subsequent refreshes
+  const prevFlightCountRef = useRef(0);
+  useEffect(() => {
+    if (mode !== "live" || openskyFlights.length === 0) return;
+    if (prevFlightCountRef.current === 0) {
+      addLog("flight", `OpenSky Network: ${openskyFlights.length} real ADS-B tracks acquired`);
+    }
+    prevFlightCountRef.current = openskyFlights.length;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openskyFlights.length, mode]);
+
+  // Sync Celestrak ref
+  useEffect(() => {
+    useRealSatsRef.current = celestrakSats.length > 0 && mode === "live";
+  }, [celestrakSats.length, mode]);
+
+  // Log when Celestrak delivers its first batch
+  const prevSatCountRef = useRef(0);
+  useEffect(() => {
+    if (mode !== "live" || celestrakSats.length === 0) return;
+    if (prevSatCountRef.current === 0) {
+      addLog("satellite", `Celestrak TLE: ${celestrakSats.length} real satellites — SGP4 propagation active`);
+    }
+    prevSatCountRef.current = celestrakSats.length;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [celestrakSats.length, mode]);
 
   // Keep ref in sync so the animation interval can read it without stale closure
   useEffect(() => {
@@ -154,19 +201,21 @@ export default function WorldviewPage() {
       // dt at 500ms interval: ~15–25 km per tick for a 600-kt aircraft → clearly visible at zoom 5-6
       const dt = 0.0025;
 
-      // Animate flights
-      setFlights((prev) => {
-        const next = prev.map((f) => {
-          let prog = f.progress + dt * (f.speed / 800);
-          if (prog >= 1) prog = 0; // loop
-          const target = f.diverted && f.divertTarget ? f.divertTarget : f.destination;
-          const [lat, lon] = interpolatePath(f.origin, target, prog);
-          const hdg = bearing([f.lat, f.lon], [lat, lon]);
-          return { ...f, lat, lon, heading: hdg, progress: prog };
+      // Animate flights (simulated only — skipped when OpenSky is providing real ADS-B positions)
+      if (!useRealFlightsRef.current) {
+        setFlights((prev) => {
+          const next = prev.map((f) => {
+            let prog = f.progress + dt * (f.speed / 800);
+            if (prog >= 1) prog = 0; // loop
+            const target = f.diverted && f.divertTarget ? f.divertTarget : f.destination;
+            const [lat, lon] = interpolatePath(f.origin, target, prog);
+            const hdg = bearing([f.lat, f.lon], [lat, lon]);
+            return { ...f, lat, lon, heading: hdg, progress: prog };
+          });
+          flightsRef.current = next;
+          return next;
         });
-        flightsRef.current = next;
-        return next;
-      });
+      }
 
       // Animate ships (simulated only — skipped when AISstream.io is providing real positions)
       if (!useRealAISRef.current) {
@@ -191,17 +240,19 @@ export default function WorldviewPage() {
         });
       }
 
-      // Animate satellites (0.5 = 500ms per step at real orbital speed)
-      setSatellites((prev) => {
-        const next = prev.map((sat) => {
-          const dt_sat = 1 / (sat.period * 60);
-          const t = (sat.t + dt_sat * 0.5) % 1;
-          const [lat, lon] = satPosition(sat, t);
-          return { ...sat, lat, lon, t };
+      // Animate satellites (simulated only — skipped when Celestrak SGP4 is active)
+      if (!useRealSatsRef.current) {
+        setSatellites((prev) => {
+          const next = prev.map((s) => {
+            const dt_sat = 1 / (s.period * 60);
+            const t = (s.t + dt_sat * 0.5) % 1;
+            const [lat, lon] = satPosition(s, t);
+            return { ...s, lat, lon, t };
+          });
+          satsRef.current = next;
+          return next;
         });
-        satsRef.current = next;
-        return next;
-      });
+      }
 
       // Randomly vary GPS jamming intensity
       setGpsZones((prev) => prev.map((z) => ({
@@ -216,33 +267,79 @@ export default function WorldviewPage() {
     };
   }, []);
 
-  // ─── AI Agent message stream ─────────────────────────────────────────────
+  // ─── AI Agent message stream (Claude via /api/aistream) ─────────────────
   useEffect(() => {
     if (mode !== "live") return;
-    const timers: ReturnType<typeof setTimeout>[] = [];
-    let idx = 0;
 
-    const scheduleNext = () => {
-      if (idx >= AI_AGENT_MESSAGES.length) {
-        // Loop
-        idx = 0;
-        setTimeout(scheduleNext, 5000);
-        return;
+    const queue: { text: string; type: string }[] = [];
+    let abortCtrl: AbortController | null = null;
+    let displayTimer: ReturnType<typeof setTimeout> | null = null;
+    let fetchTimer:   ReturnType<typeof setTimeout> | null = null;
+
+    // Drip messages out of the queue every 3–5 s for a live-feed feel
+    const drip = () => {
+      if (queue.length > 0) {
+        const msg = queue.shift()!;
+        setAiMessages(prev => [...prev.slice(-12), { id: generateId(), text: msg.text, type: msg.type }]);
+        displayTimer = setTimeout(drip, 3000 + Math.random() * 2000);
+      } else {
+        displayTimer = setTimeout(drip, 1000);
       }
-      const { delay, msg, type } = AI_AGENT_MESSAGES[idx];
-      const timer = setTimeout(() => {
-        setAiMessages((prev) => [
-          ...prev.slice(-12), // keep last 12
-          { id: generateId(), text: msg, type },
-        ]);
-        idx++;
-        scheduleNext();
-      }, delay);
-      timers.push(timer);
     };
-    scheduleNext();
 
-    return () => timers.forEach(clearTimeout);
+    const fetchCycle = async () => {
+      abortCtrl = new AbortController();
+      try {
+        const res = await fetch('/api/aistream', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            flightCount: flightsRef.current.length,
+            shipCount:   shipsRef.current.length,
+            satCount:    satsRef.current.length,
+            jamZones:    GPS_JAM_ZONES_INITIAL.length,
+            threatLevel: 'YELLOW',
+          }),
+          signal: abortCtrl.signal,
+        });
+        if (!res.ok || !res.body) { fetchTimer = setTimeout(fetchCycle, 20_000); return; }
+
+        const reader  = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = '';
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const parts = buf.split('\n');
+          buf = parts.pop() ?? '';
+          for (const line of parts) {
+            if (!line.startsWith('data: ')) continue;
+            try {
+              const data = JSON.parse(line.slice(6)) as Record<string, unknown>;
+              if (data.done) { fetchTimer = setTimeout(fetchCycle, 50_000); return; }
+              if (typeof data.type === 'string' && typeof data.text === 'string') {
+                queue.push({ text: data.text, type: data.type });
+              }
+            } catch { /* skip */ }
+          }
+        }
+        fetchTimer = setTimeout(fetchCycle, 50_000);
+      } catch (e: unknown) {
+        if (e instanceof Error && e.name !== 'AbortError') {
+          fetchTimer = setTimeout(fetchCycle, 20_000);
+        }
+      }
+    };
+
+    fetchCycle();
+    drip();
+
+    return () => {
+      abortCtrl?.abort();
+      if (displayTimer) clearTimeout(displayTimer);
+      if (fetchTimer)   clearTimeout(fetchTimer);
+    };
   }, [mode]);
 
   // ─── Mode switching ───────────────────────────────────────────────────────
@@ -405,9 +502,9 @@ export default function WorldviewPage() {
 
   // ─── Header bar top stats ────────────────────────────────────────────────
   const topStats = [
-    { label: "TRACKS", val: flights.length, color: "#4488ff" },
+    { label: "TRACKS", val: displayFlights.length, color: "#4488ff" },
     { label: "VESSELS", val: displayShips.length, color: "#ffd700" },
-    { label: "SATELLITES", val: satellites.length, color: "#00ff9d" },
+    { label: "SATELLITES", val: displaySatellites.length, color: "#00ff9d" },
     { label: "JAM ZONES", val: gpsZones.length, color: "#ff3366" },
     { label: "NFZ ACTIVE", val: noFlyZones.filter(z => z.active).length, color: "#ff8c00" },
   ];
@@ -500,7 +597,7 @@ export default function WorldviewPage() {
           onModeChange={setMode}
           layers={layers}
           onLayerToggle={handleLayerToggle}
-          satellites={satellites}
+          satellites={displaySatellites}
           gpsZones={gpsZones}
           systemTime={systemTime}
           threatLevel={threatLevel}
@@ -514,9 +611,9 @@ export default function WorldviewPage() {
           {/* Map */}
           <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
             <CommandCenter
-              flights={flights}
+              flights={displayFlights}
               ships={displayShips}
-              satellites={satellites}
+              satellites={displaySatellites}
               gpsZones={gpsZones}
               noFlyZones={noFlyZones}
               events={events}
@@ -537,9 +634,9 @@ export default function WorldviewPage() {
                 color: "var(--accent-cyan)", opacity: 0.6,
                 lineHeight: 1.8,
               }}>
-                <div>LAT: {flights[0]?.lat.toFixed(4) || "—"}°N</div>
-                <div>LON: {flights[0]?.lon.toFixed(4) || "—"}°E</div>
-                <div>ALT: {(flights[0]?.altitude || 0).toLocaleString()} FT</div>
+                <div>LAT: {displayFlights[0]?.lat.toFixed(4) || "—"}°N</div>
+                <div>LON: {displayFlights[0]?.lon.toFixed(4) || "—"}°E</div>
+                <div>ALT: {(displayFlights[0]?.altitude || 0).toLocaleString()} FT</div>
               </div>
             </div>
 
